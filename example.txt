@@ -1,0 +1,156 @@
+'use client';
+import { useState, useRef, useCallback } from 'react';
+
+export default function AudioRecorder() {
+  const [conversation, setConversation] = useState([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const audioRef = useRef(null);
+  const recorderRef = useRef(null);
+  const chunksRef = useRef([]);
+
+  const processConversation = useCallback(async (audioBlob) => {
+    if (!(audioBlob instanceof Blob)) {
+      console.error('Invalid audio blob');
+      return;
+    }
+
+    setIsProcessing(true);
+    
+    try {
+      // Step 1: STT - Convert speech to text
+      const sttFormData = new FormData();
+      sttFormData.append('audio', audioBlob, `recording-${Date.now()}.webm`);
+      
+      const sttResponse = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: sttFormData,
+      });
+
+      if (!sttResponse.ok) {
+        throw new Error('STT failed');
+      }
+
+      const { text: userText } = await sttResponse.json();
+      
+      setConversation(prev => [...prev, { speaker: 'user', text: userText }]);
+      
+      // Step 2: LLM - Get AI response
+      const llmResponse = await fetch('/api/llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: userText }),
+      });
+
+      if (!llmResponse.ok) {
+        throw new Error('LLM failed');
+      }
+
+      const { response: aiText } = await llmResponse.json();
+      
+      setConversation(prev => [...prev, { speaker: 'ai', text: aiText }]);
+      
+      // Step 3: TTS - Convert AI text to speech
+      const ttsResponse = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: aiText }),
+      });
+
+      if (!ttsResponse.ok) {
+        throw new Error('TTS failed');
+      }
+
+      const responseBlob = await ttsResponse.blob();
+      const audioUrl = URL.createObjectURL(responseBlob);
+      
+      if (audioRef.current) {
+        audioRef.current.src = audioUrl;
+        audioRef.current.play().catch(e => console.error('Audio play failed:', e));
+      }
+
+    } catch (error) {
+      console.error('Conversation error:', error);
+      setConversation(prev => [...prev, { 
+        speaker: 'ai', 
+        text: 'Sorry, I encountered an error. Please try again.' 
+      }]);
+    } finally {
+      setIsProcessing(false);
+    }
+  }, []);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recorderRef.current = new MediaRecorder(stream);
+      chunksRef.current = [];
+      
+      recorderRef.current.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+      
+      recorderRef.current.start(100); // Collect data every 100ms
+      setIsRecording(true);
+    } catch (error) {
+      console.error('Recording error:', error);
+    }
+  };
+
+  const stopRecording = async () => {
+    if (!recorderRef.current) return;
+    
+    return new Promise((resolve) => {
+      recorderRef.current.onstop = () => {
+        const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        processConversation(audioBlob).finally(resolve);
+      };
+      recorderRef.current.stop();
+      setIsRecording(false);
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      <button
+        onClick={isRecording ? stopRecording : startRecording}
+        className={`btn ${isRecording ? 'btn-error' : 'btn-primary'} w-full`}
+        disabled={isProcessing}
+      >
+        {isRecording ? (
+          <>
+            <span className="relative flex h-3 w-3 mr-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+            </span>
+            Stop Recording
+          </>
+        ) : (
+          'Start Recording'
+        )}
+        {isProcessing && <span className="loading loading-spinner ml-2"></span>}
+      </button>
+      
+      <audio ref={audioRef} className="hidden" />
+      
+      <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
+        {conversation.map((entry, index) => (
+          <div 
+            key={index} 
+            className={`flex ${entry.speaker === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
+            <div className={`max-w-xs md:max-w-md rounded-lg p-4 ${
+              entry.speaker === 'user' 
+                ? 'bg-primary text-primary-content' 
+                : 'bg-secondary text-secondary-content'
+            }`}>
+              {entry.text}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}

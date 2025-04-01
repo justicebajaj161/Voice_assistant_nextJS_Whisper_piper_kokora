@@ -1,0 +1,33 @@
+{
+  "name": "whisper-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@ffmpeg/core": "^0.12.10",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "axios": "^1.8.4",
+    "child_process": "^1.0.2",
+    "daisyui": "^5.0.9",
+    "ffmpeg-static": "^5.2.0",
+    "fs": "^0.0.1-security",
+    "next": "15.2.4",
+    "path": "^0.12.7",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "recorder-js": "^1.0.7",
+    "voice-activity-detection": "^0.0.5"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4.0.17",
+    "eslint": "^9",
+    "eslint-config-next": "15.2.4",
+    "tailwindcss": "^4.0.17"
+  }
+}

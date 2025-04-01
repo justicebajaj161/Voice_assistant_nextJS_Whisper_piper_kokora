@@ -1,0 +1,2 @@
+en_US-libritts-high.onnx
+en_US-lessac-medium.onnx

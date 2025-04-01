@@ -1,0 +1,65 @@
+import { exec } from 'child_process';
+import path from 'path';
+import fs from 'fs';
+import { NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST(request) {
+  const { text } = await request.json();
+  
+  // Paths for Kokoro TTS
+  const KOKORO_DIR = '/Users/codingninjas/Documents/konkorotts/kokoro-onnx';
+  const modelPath = path.join(KOKORO_DIR, 'kokoro-v1.0.onnx');
+  const voicesPath = path.join(KOKORO_DIR, 'voices-v1.0.bin');
+  const outputPath = path.join(KOKORO_DIR, 'output.wav');
+
+  try {
+    // Clean previous file
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+
+    // Escape single quotes in the text for Python command
+    const escapedText = text.replace(/'/g, "\\'");
+    
+    // Python command to generate speech using Kokoro
+    const command = `python -c "` +
+      `import soundfile as sf; ` +
+      `from kokoro_onnx import Kokoro; ` +
+      `kokoro = Kokoro('${modelPath}', '${voicesPath}'); ` +
+      `samples, sample_rate = kokoro.create('${escapedText}', voice='af_nicole'); ` +
+      `sf.write('${outputPath}', samples, sample_rate);"`;
+
+    await new Promise((resolve, reject) => {
+      exec(command, { 
+        cwd: KOKORO_DIR,
+        shell: true
+      }, (error, stdout, stderr) => {
+        if (error) {
+          console.error('Error:', error);
+          console.error('Stderr:', stderr);
+          reject(new Error('Failed to generate speech with Kokoro TTS'));
+        } else {
+          resolve();
+        }
+      });
+    });
+
+    // Read and return the generated audio file
+    const audioData = fs.readFileSync(outputPath);
+    fs.unlinkSync(outputPath); // Clean up
+
+    // Play the audio (macOS specific command)
+    exec(`afplay ${outputPath}`, { cwd: KOKORO_DIR });
+
+    return new NextResponse(audioData, {
+      headers: { 'Content-Type': 'audio/wav' }
+    });
+
+  } catch (error) {
+    console.error('TTS Error:', error);
+    return NextResponse.json(
+      { error: 'Failed to generate speech. Try a shorter message.' },
+      { status: 500 }
+    );
+  }
+}
