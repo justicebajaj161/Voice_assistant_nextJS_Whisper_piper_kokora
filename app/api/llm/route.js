@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
+import OpenAI from 'openai';
 
 export const dynamic = 'force-dynamic';
+
+// Initialize OpenAI client
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY // Make sure to set this in your environment variables
+});
 
 export async function POST(request) {
   const { prompt, conversationHistory = [] } = await request.json();
@@ -13,58 +19,43 @@ export async function POST(request) {
   }
 
   try {
-    // Create system prompt to establish Ashley's personality
-    const systemPrompt = `
-    You are CodeHelper, a friendly and knowledgeable AI programming assistant. You help with coding questions in an approachable way with these characteristics:
-    - Respond like a patient teacher, not just an AI
-    - Use simple technical terms with occasional casual language ("gotcha", "let's see", "ah, that makes sense")
-    - Show encouragement through text (but never use emojis)
-    - Provide concise explanations (1-3 sentences usually) with code examples when needed
-    - Ask clarifying questions about the problem when necessary
-    - Remember previous code context and problems discussed
-    
-    Current conversation context about the coding problem:
-    ${conversationHistory.map(msg => `${msg.speaker}: ${msg.text}`).join('\n')}
-    
-    When answering:
-    1. First briefly understand the problem
-    2. Then provide a solution with short, clear code snippets if applicable
-    3. Finally explain the solution in simple terms
-  `;
-
-    // Combine with user prompt
-    const fullPrompt = `${systemPrompt}\n\nUser: ${prompt}\nAshley:`;
-
-    const ollamaResponse = await fetch('http://localhost:11434/api/generate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+    // Prepare conversation history in OpenAI format
+    const messages = [
+      {
+        role: "system",
+        content: `
+          You are Ashley, a friendly and empathetic AI companion. You speak in a natural, 
+          conversational way with these characteristics:
+          - Respond like a human friend, not an AI assistant
+          - Use casual language with occasional slang ("hey", "cool", "awesome")
+          - Show emotions through text (but never use emojis)
+          - Keep responses concise (1-2 sentences usually)
+          - Ask follow-up questions to keep conversation flowing
+          - Remember context from previous messages
+        `
       },
-      body: JSON.stringify({
-        model: 'llama3',
-        prompt: fullPrompt,
-        stream: false,
-        options: {
-          temperature: 0.7, // Makes responses more varied/creative
-          top_p: 0.9,       // Helps with response quality
-        }
-      }),
+      ...conversationHistory.map(msg => ({
+        role: msg.speaker === 'User' ? 'user' : 'assistant',
+        content: msg.text
+      })),
+      {
+        role: "user",
+        content: prompt
+      }
+    ];
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: messages,
+      temperature: 0.7,  // Makes responses more varied/creative
+      top_p: 0.9,        // Helps with response quality
     });
 
-    if (!ollamaResponse.ok) {
-      throw new Error(`Ollama API error: ${ollamaResponse.status}`);
-    }
-
-    const result = await ollamaResponse.json();
-    
-    // Clean up response
-    let response = result.response.trim();
-    // Remove any duplicate "Ashley:" prefixes that might appear
-    response = response.replace(/^Ashley:\s*/i, '');
+    const response = completion.choices[0]?.message?.content?.trim() || "I didn't get that. Can you try again?";
 
     return NextResponse.json({ response });
   } catch (error) {
-    console.error('LLM Error:', error);
+    console.error('OpenAI Error:', error);
     return NextResponse.json(
       { error: 'Failed to generate response' },
       { status: 500 }

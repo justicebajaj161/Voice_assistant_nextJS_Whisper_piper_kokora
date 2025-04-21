@@ -1,6 +1,12 @@
 import { exec } from 'child_process';
 import fs from 'fs';
 import { NextResponse } from 'next/server';
+import OpenAI from 'openai';
+
+// Initialize OpenAI client
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY // Make sure to set this in your environment variables
+});
 
 export async function POST(request) {
   const formData = await request.formData();
@@ -17,14 +23,13 @@ export async function POST(request) {
   const timestamp = Date.now();
   const inputPath = `${tempDir}/${timestamp}.webm`;
   const outputPath = `${tempDir}/${timestamp}.mp3`;
-  const outputBase = `${tempDir}/${timestamp}`;
 
   try {
     // Save uploaded file
     const audioBuffer = await audioFile.arrayBuffer();
     fs.writeFileSync(inputPath, Buffer.from(audioBuffer));
 
-    // Convert to MP3
+    // Convert to MP3 (if needed - OpenAI API supports many formats including webm)
     await new Promise((resolve, reject) => {
       exec(`ffmpeg -i ${inputPath} ${outputPath}`, (error) => {
         if (error) reject(error);
@@ -32,36 +37,15 @@ export async function POST(request) {
       });
     });
 
-    // Transcribe using Whisper with explicit output directory
-    const transcription = await new Promise((resolve, reject) => {
-      exec(
-        `whisper ${outputPath} --model base --output_format txt --language en --output_dir ${tempDir}`,
-        (error, stdout) => {
-          if (error) {
-            reject(error);
-          } else {
-            const txtFile = `${outputBase}.txt`;
-            if (!fs.existsSync(txtFile)) {
-              reject(new Error(`Output file not found: ${txtFile}`));
-              return;
-            }
-            const text = fs.readFileSync(txtFile, 'utf-8');
-            resolve(text);
-          }
-        }
-      );
+    // Transcribe using OpenAI Whisper API
+    const transcription = await openai.audio.transcriptions.create({
+      file: fs.createReadStream(outputPath),
+      model: "whisper-1",
+      language: 'en'
     });
 
-    // Clean up all possible files
-    const filesToDelete = [
-      inputPath,
-      outputPath,
-      `${outputBase}.txt`,
-      `${outputBase}.json`,
-      `${outputBase}.srt`,
-      `${outputBase}.vtt`
-    ];
-    
+    // Clean up files
+    const filesToDelete = [inputPath, outputPath];
     filesToDelete.forEach(file => {
       try {
         if (fs.existsSync(file)) fs.unlinkSync(file);
@@ -70,16 +54,13 @@ export async function POST(request) {
       }
     });
 
-    return NextResponse.json({ text: transcription });
+    return NextResponse.json({ text: transcription.text });
   } catch (error) {
     // Attempt cleanup even if we failed
     try {
-      [inputPath, outputPath, `${outputBase}.*`].forEach(pattern => {
+      [inputPath, outputPath].forEach(file => {
         try {
-          const files = fs.readdirSync(tempDir).filter(f => f.includes(timestamp));
-          files.forEach(file => {
-            fs.unlinkSync(`${tempDir}/${file}`);
-          });
+          if (fs.existsSync(file)) fs.unlinkSync(file);
         } catch (e) {}
       });
     } catch (cleanupError) {
